@@ -46,63 +46,89 @@ function validarCampos() {
   return true;
 }
 
-document.getElementById('registerForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const msgElement = document.getElementById('registerMsg');
-  
-  if (!validarCampos()) {
-    return;
-  }
-  
-  const nome = document.getElementById('regNome').value.trim();
-  const email = document.getElementById('regEmail').value.trim();
-  const senha = document.getElementById('regSenha').value.trim();
+document.addEventListener('DOMContentLoaded', function() {
+  // Verificar se já está logado
+  checkAuthStatus();
 
-  try {
-    msgElement.textContent = 'Enviando...';
-    
-    console.log('Enviando para:', `${apiUrl}/register`);
-    console.log('Dados:', { nome, email, senha });
-    
-    const res = await fetch(`${apiUrl}/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome, email, senha })
-    });
-    
-    const responseText = await res.text();
-    console.log('Status da resposta:', res.status);
-    console.log('Headers:', [...res.headers.entries()]);
-    console.log('Texto da resposta:', responseText);
-    
-    if (!responseText) {
-      throw new Error('Resposta vazia do servidor');
-    }
-    
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (err) {
-      console.error('Erro ao analisar JSON:', responseText);
-      throw new Error('Resposta inválida do servidor');
-    }
-    
-    if (!res.ok) {
-      throw new Error(data.error || 'Erro ao registrar');
-    }
-    
-    msgElement.textContent = data.message || 'Usuário registrado com sucesso!';
-    msgElement.style.color = 'green';
-    
-    if (data.message) {
-      setTimeout(() => window.location.href = 'login.html', 1500);
-    }
-  } catch (error) {
-    console.error('Erro:', error);
-    msgElement.textContent = error.message || 'Ocorreu um erro ao registrar';
-    msgElement.style.color = 'var(--msg)';
+  const registerForm = document.getElementById('registerForm');
+  if (registerForm) {
+      registerForm.addEventListener('submit', handleRegister);
   }
 });
+
+async function checkAuthStatus() {
+  try {
+      const response = await fetch('/auth/check', {
+          method: 'GET',
+          credentials: 'include' // Importante para sessões
+      });
+      
+      if (response.ok) {
+          // Já está logado, redirecionar para o feed
+          window.location.href = '/feed';
+      }
+  } catch (error) {
+      console.log('Usuário não autenticado');
+  }
+}
+
+async function handleRegister(event) {
+  event.preventDefault();
+  
+  const username = document.getElementById('username').value;
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const confirmPassword = document.getElementById('confirmPassword').value;
+  const errorMessage = document.getElementById('errorMessage');
+  
+  // Limpar mensagens de erro anteriores
+  errorMessage.style.display = 'none';
+  
+  // Validações
+  if (!username || !email || !password || !confirmPassword) {
+      showError('Por favor, preencha todos os campos.');
+      return;
+  }
+  
+  if (password !== confirmPassword) {
+      showError('As senhas não coincidem.');
+      return;
+  }
+  
+  if (password.length < 6) {
+      showError('A senha deve ter pelo menos 6 caracteres.');
+      return;
+  }
+  
+  try {
+      const response = await fetch('/auth/register', {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json'
+          },
+          credentials: 'include', // Importante para sessões
+          body: JSON.stringify({ username, email, password })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+          // Registro bem-sucedido - não precisa mais armazenar token
+          window.location.href = '/feed';
+      } else {
+          showError(data.error || 'Erro no registro');
+      }
+  } catch (error) {
+      console.error('Erro no registro:', error);
+      showError('Erro de conexão. Tente novamente.');
+  }
+}
+
+function showError(message) {
+  const errorMessage = document.getElementById('errorMessage');
+  errorMessage.textContent = message;
+  errorMessage.style.display = 'block';
+}
 
 document.getElementById('regNome').addEventListener('input', () => {
   document.getElementById('registerMsg').textContent = '';

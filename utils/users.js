@@ -1,74 +1,148 @@
-const jwt = require('jsonwebtoken');
 const User = require('../models/user');
-const { logError } = require('./logger');
 
+// Remove JWT, usa apenas sessões
 function verifyAuth(req) {
+    if (!req.session || !req.session.userId) {
+        return { success: false, error: 'Usuário não autenticado' };
+    }
+    return { success: true, userId: req.session.userId };
+}
+
+async function handleRegisterUser(req, res) {
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader) {
-            return null;
+        const { username, email, password } = req.body;
+        
+        if (!username || !email || !password) {
+            return sendJSON(res, 400, { success: false, error: 'Todos os campos são obrigatórios' });
         }
-        const token = authHeader.replace('Bearer ', '');
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'sua_chave_secreta');
-        return decoded.id;
-    } catch (err) {
-        return null;
+
+        const existingUser = await User.findOne({ 
+            $or: [{ email }, { username }] 
+        });
+        
+        if (existingUser) {
+            return sendJSON(res, 400, { success: false, error: 'Usuário ou email já existe' });
+        }
+
+        const user = new User({ username, email, password });
+        await user.save();
+        
+        // Criar sessão após registro
+        req.session.userId = user._id;
+        req.session.username = user.username;
+        
+        sendJSON(res, 201, { 
+            success: true, 
+            message: 'Usuário criado com sucesso',
+            user: { id: user._id, username: user.username, email: user.email }
+        });
+    } catch (error) {
+        console.error('Erro no registro:', error);
+        sendJSON(res, 500, { success: false, error: 'Erro interno do servidor' });
     }
 }
 
-function sendJSON(res, statusCode, data) {
-    res.writeHead(statusCode, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-    });
-    res.end(JSON.stringify(data));
+async function handleLoginUser(req, res) {
+    try {
+        const { email, password } = req.body;
+        
+        if (!email || !password) {
+            return sendJSON(res, 400, { success: false, error: 'Email e senha são obrigatórios' });
+        }
+
+        const user = await User.findOne({ email });
+        if (!user) {
+            return sendJSON(res, 401, { success: false, error: 'Credenciais inválidas' });
+        }
+
+        const isMatch = await user.comparePassword(password);
+        if (!isMatch) {
+            return sendJSON(res, 401, { success: false, error: 'Credenciais inválidas' });
+        }
+
+        // Criar sessão
+        req.session.userId = user._id;
+        req.session.username = user.username;
+        
+        sendJSON(res, 200, { 
+            success: true, 
+            message: 'Login realizado com sucesso',
+            user: { id: user._id, username: user.username, email: user.email }
+        });
+    } catch (error) {
+        console.error('Erro no login:', error);
+        sendJSON(res, 500, { success: false, error: 'Erro interno do servidor' });
+    }
 }
 
-async function handleFollowUser(req, res, userId) {
+async function handleLogoutUser(req, res) {
     try {
-        const currentUserId = verifyAuth(req);
+        req.session.destroy((err) => {
+            if (err) {
+                return sendJSON(res, 500, { success: false, error: 'Erro ao fazer logout' });
+            }
+            res.clearCookie('connect.sid');
+            sendJSON(res, 200, { success: true, message: 'Logout realizado com sucesso' });
+        });
+    } catch (error) {
+        console.error('Erro no logout:', error);
+        sendJSON(res, 500, { success: false, error: 'Erro interno do servidor' });
+    }
+}
 
-        if (!currentUserId) {
-            return sendJSON(res, 401, { error: 'Por favor, faça login para acessar.' });
+async function handleFollowUser(req, res) {
+    const authResult = verifyAuth(req);
+    if (!authResult.success) {
+        return sendJSON(res, 401, authResult);
+    }
+
+    try {
+        const { userIdToFollow } = req.body;
+        const currentUserId = authResult.userId;
+
+        if (currentUserId === userIdToFollow) {
+            return sendJSON(res, 400, { success: false, error: 'Você não pode seguir a si mesmo' });
         }
 
-        if (userId === currentUserId) {
-            return sendJSON(res, 400, { error: 'Não é possível seguir a si mesmo.' });
-        }
-
-        const targetUser = await User.findById(userId);
         const currentUser = await User.findById(currentUserId);
+        const userToFollow = await User.findById(userIdToFollow);
 
-        if (!targetUser) {
-            return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
+        if (!userToFollow) {
+            return sendJSON(res, 404, { success: false, error: 'Usuário não encontrado' });
         }
 
-        const isFollowing = currentUser.seguindo.includes(userId);
+        const isFollowing = currentUser.following.includes(userIdToFollow);
 
         if (isFollowing) {
-            currentUser.seguindo.pull(userId);
-            targetUser.seguidores.pull(currentUserId);
-            await currentUser.save();
-            await targetUser.save();
-            return sendJSON(res, 200, { message: 'Deixou de seguir o usuário.' });
+            currentUser.following.pull(userIdToFollow);
+            userToFollow.followers.pull(currentUserId);
         } else {
-            currentUser.seguindo.push(userId);
-            targetUser.seguidores.push(currentUserId);
-            await currentUser.save();
-            await targetUser.save();
-            return sendJSON(res, 200, { message: 'Agora você está seguindo o usuário.' });
+            currentUser.following.push(userIdToFollow);
+            userToFollow.followers.push(currentUserId);
         }
-    } catch (err) {
-        console.error(err);
-        logError(err);
-        return sendJSON(res, 500, { error: 'Erro ao executar a ação de seguir/desseguir.' });
+
+        await currentUser.save();
+        await userToFollow.save();
+
+        sendJSON(res, 200, { 
+            success: true, 
+            message: isFollowing ? 'Deixou de seguir' : 'Seguindo usuário',
+            isFollowing: !isFollowing
+        });
+    } catch (error) {
+        console.error('Erro ao seguir usuário:', error);
+        sendJSON(res, 500, { success: false, error: 'Erro interno do servidor' });
     }
+}
+
+function sendJSON(res, status, data) {
+    res.status(status).json(data);
 }
 
 module.exports = {
-    verifyAuth,
-    sendJSON,
-    handleFollowUser
+    handleRegisterUser,
+    handleLoginUser,
+    handleLogoutUser,
+    handleFollowUser,
+    verifyAuth
 };

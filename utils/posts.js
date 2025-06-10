@@ -1,240 +1,184 @@
 const Post = require('../models/post');
-const Comment = require('../models/comment');
-const jwt = require('jsonwebtoken');
-const { logError } = require('./logger');
-const url = require('url');
+const User = require('../models/user');
 
+// Remove JWT, usa apenas sessões
 function verifyAuth(req) {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return null;
+    if (!req.session || !req.session.userId) {
+        return { success: false, error: 'Usuário não autenticado' };
     }
-    const token = authHeader.replace('Bearer ', '');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'sua_chave_secreta');
-    return decoded.id;
-  } catch (err) {
-    return null;
-  }
-}
-
-function sendJSON(res, statusCode, data) {
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-  });
-  res.end(JSON.stringify(data));
-}
-
-function getRequestBody(req) {
-  return new Promise((resolve) => {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      try {
-        resolve(JSON.parse(body));
-      } catch (err) {
-        resolve({});
-      }
-    });
-  });
-}
-
-async function getPostById(req, res, postId) {
-  try {
-    const userId = verifyAuth(req);
-    if (!userId) {
-      return sendJSON(res, 401, { error: 'Por favor, faça login para acessar.' });
-    }
-
-    const post = await Post.findById(postId)
-      .populate('autor', 'nome email');
-      
-    if (!post) {
-      return sendJSON(res, 404, { error: 'Post não encontrado.' });
-    }
-    
-    sendJSON(res, 200, post);
-  } catch (err) {
-    logError(err);
-    sendJSON(res, 500, { error: 'Erro ao buscar post.' });
-  }
-}
-
-async function getPosts(req, res) {
-  try {
-    const userId = verifyAuth(req);
-    if (!userId) {
-      return sendJSON(res, 401, { error: 'Por favor, faça login para acessar.' });
-    }
-
-    const parsedUrl = url.parse(req.url, true);
-    const postId = parsedUrl.query.post;
-
-    if (postId) {
-      const comments = await Comment.find({ post: postId })
-        .populate('autor', 'nome email')
-        .sort({ dataCriacao: -1 });
-      return sendJSON(res, 200, comments);
-    }
-
-    const posts = await Post.find()
-      .populate('autor', 'nome email seguidores')
-      .sort({ dataCriacao: -1 });
-    sendJSON(res, 200, posts);
-  } catch (err) {
-    logError(err);
-    sendJSON(res, 500, { error: 'Erro ao buscar posts ou comentários.' });
-  }
+    return { success: true, userId: req.session.userId };
 }
 
 async function createPost(req, res) {
-  try {
-    const userId = verifyAuth(req);
-    if (!userId) {
-      return sendJSON(res, 401, { error: 'Por favor, faça login para acessar.' });
+    const authResult = verifyAuth(req);
+    if (!authResult.success) {
+        return sendJSON(res, 401, authResult);
     }
 
-    const body = await getRequestBody(req);
-    const { post, conteudo } = body;
+    try {
+        const { content } = req.body;
+        
+        if (!content || content.trim() === '') {
+            return sendJSON(res, 400, { success: false, error: 'Conteúdo do post é obrigatório' });
+        }
 
-    if (post) {
-      const postExists = await Post.findById(post);
-      if (!postExists) {
-        return sendJSON(res, 404, { error: 'Post não encontrado.' });
-      }
+        const user = await User.findById(authResult.userId);
+        if (!user) {
+            return sendJSON(res, 404, { success: false, error: 'Usuário não encontrado' });
+        }
 
-      const comment = new Comment({
-        autor: userId,
-        post,
-        conteudo
-      });
+        const post = new Post({
+            content: content.trim(),
+            author: authResult.userId,
+            createdAt: new Date()
+        });
 
-      await comment.save();
-      await comment.populate('autor', 'nome email');
+        await post.save();
+        await post.populate('author', 'username');
 
-      return sendJSON(res, 201, comment);
+        sendJSON(res, 201, { 
+            success: true, 
+            message: 'Post criado com sucesso',
+            post: {
+                _id: post._id,
+                content: post.content,
+                author: { _id: post.author._id, username: post.author.username },
+                createdAt: post.createdAt,
+                likes: post.likes,
+                comments: post.comments
+            }
+        });
+    } catch (error) {
+        console.error('Erro ao criar post:', error);
+        sendJSON(res, 500, { success: false, error: 'Erro interno do servidor' });
+    }
+}
+
+async function getPosts(req, res) {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const posts = await Post.find()
+            .populate('author', 'username')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        const total = await Post.countDocuments();
+
+        sendJSON(res, 200, { 
+            success: true, 
+            posts,
+            pagination: {
+                page,
+                limit,
+                total,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        console.error('Erro ao buscar posts:', error);
+        sendJSON(res, 500, { success: false, error: 'Erro interno do servidor' });
+    }
+}
+
+async function deletePost(req, res) {
+    const authResult = verifyAuth(req);
+    if (!authResult.success) {
+        return sendJSON(res, 401, authResult);
     }
 
-    const newPost = new Post({
-      autor: userId,
-      conteudo
-    });
-    await newPost.save();
-    await newPost.populate('autor', 'nome email');
-    sendJSON(res, 201, { message: 'Post criado com sucesso!', post: newPost });
-  } catch (err) {
-    logError(err);
-    sendJSON(res, 500, { error: 'Erro ao criar post ou comentário.' });
-  }
+    try {
+        const { id } = req.params;
+        
+        const post = await Post.findById(id);
+        if (!post) {
+            return sendJSON(res, 404, { success: false, error: 'Post não encontrado' });
+        }
+
+        if (post.author.toString() !== authResult.userId) {
+            return sendJSON(res, 403, { success: false, error: 'Não autorizado a deletar este post' });
+        }
+
+        await Post.findByIdAndDelete(id);
+        
+        sendJSON(res, 200, { success: true, message: 'Post deletado com sucesso' });
+    } catch (error) {
+        console.error('Erro ao deletar post:', error);
+        sendJSON(res, 500, { success: false, error: 'Erro interno do servidor' });
+    }
+}
+
+async function likePost(req, res) {
+    const authResult = verifyAuth(req);
+    if (!authResult.success) {
+        return sendJSON(res, 401, authResult);
+    }
+
+    try {
+        const { postId } = req.body;
+        const userId = authResult.userId;
+
+        const post = await Post.findById(postId);
+        if (!post) {
+            return sendJSON(res, 404, { success: false, error: 'Post não encontrado' });
+        }
+
+        const hasLiked = post.likes.includes(userId);
+
+        if (hasLiked) {
+            post.likes.pull(userId);
+        } else {
+            post.likes.push(userId);
+        }
+
+        await post.save();
+
+        sendJSON(res, 200, { 
+            success: true, 
+            message: hasLiked ? 'Like removido' : 'Post curtido',
+            likesCount: post.likes.length,
+            hasLiked: !hasLiked
+        });
+    } catch (error) {
+        console.error('Erro ao curtir post:', error);
+        sendJSON(res, 500, { success: false, error: 'Erro interno do servidor' });
+    }
 }
 
 async function searchPosts(req, res) {
-  try {
-    const parsedUrl = url.parse(req.url, true);
-    const query = parsedUrl.query.query;
-    console.log('Query de busca:', query);
-    
-    const posts = await Post.find({
-      conteudo: { $regex: query, $options: 'i' }
-    }).populate('autor', 'nome email');
-    
-    sendJSON(res, 200, posts);
-  } catch (err) {
-    console.error(err);
-    logError(err);
-    sendJSON(res, 500, { error: 'Erro na busca de posts.' });
-  }
+    try {
+        const { query } = req.query;
+        
+        if (!query || query.trim() === '') {
+            return sendJSON(res, 400, { success: false, error: 'Termo de busca é obrigatório' });
+        }
+
+        const posts = await Post.find({
+            content: { $regex: query, $options: 'i' }
+        })
+        .populate('author', 'username')
+        .sort({ createdAt: -1 })
+        .limit(20);
+
+        sendJSON(res, 200, { success: true, posts });
+    } catch (error) {
+        console.error('Erro na busca:', error);
+        sendJSON(res, 500, { success: false, error: 'Erro interno do servidor' });
+    }
 }
 
-async function deletePost(req, res, postId) {
-  try {
-    const userId = verifyAuth(req);
-    if (!userId) {
-      return sendJSON(res, 401, { error: 'Por favor, faça login para acessar.' });
-    }
-
-    const post = await Post.findById(postId);
-    if (!post) {
-      return sendJSON(res, 404, { error: 'Post não encontrado.' });
-    }
-
-    if (post.autor.toString() !== userId) {
-      return sendJSON(res, 403, { error: 'Você não tem permissão para excluir este post.' });
-    }
-
-    await Post.findByIdAndDelete(postId);
-    sendJSON(res, 200, { message: 'Post excluído com sucesso!' });
-  } catch (err) {
-    logError(err);
-    sendJSON(res, 500, { error: 'Erro ao excluir post.' });
-  }
-}
-
-async function deleteComment(req, res, commentId) {
-  try {
-    const userId = verifyAuth(req);
-    if (!userId) {
-      return sendJSON(res, 401, { error: 'Por favor, faça login para acessar.' });
-    }
-
-    const comment = await Comment.findById(commentId);
-
-    if (!comment) {
-      return sendJSON(res, 404, { error: 'Comentário não encontrado.' });
-    }
-
-    if (comment.autor.toString() !== userId) {
-      return sendJSON(res, 403, { error: 'Você não tem permissão para excluir este comentário.' });
-    }
-
-    await Comment.findByIdAndDelete(commentId);
-    sendJSON(res, 200, { message: 'Comentário excluído com sucesso!' });
-  } catch (err) {
-    logError(err);
-    sendJSON(res, 500, { error: 'Erro ao excluir comentário.' });
-  }
-}
-
-async function likePost(req, res, postId) {
-  try {
-    const userId = verifyAuth(req);
-    if (!userId) {
-      return sendJSON(res, 401, { error: 'Por favor, faça login para acessar.' });
-    }
-
-    const post = await Post.findById(postId);
-    if (!post) {
-      return sendJSON(res, 404, { error: 'Post não encontrado.' });
-    }
-
-    const index = post.curtidas.findIndex(id => id.toString() === userId);
-    if (index === -1) {
-      post.curtidas.push(userId);
-    } else {
-      post.curtidas = post.curtidas.filter(id => id.toString() !== userId);
-    }
-
-    await post.save();
-    sendJSON(res, 200, { message: 'Ação realizada com sucesso!', curtidas: post.curtidas.length });
-  } catch (err) {
-    logError(err);
-    sendJSON(res, 500, { error: 'Erro ao processar a ação.' });
-  }
+function sendJSON(res, status, data) {
+    res.status(status).json(data);
 }
 
 module.exports = {
-  getPostById,
-  getPosts,
-  createPost,
-  searchPosts,
-  deletePost,
-  deleteComment,
-  likePost,
-  verifyAuth,
-  sendJSON
+    createPost,
+    getPosts,
+    deletePost,
+    likePost,
+    searchPosts,
+    verifyAuth
 };

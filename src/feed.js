@@ -1,5 +1,7 @@
+let currentUser = null;
+
 document.addEventListener("DOMContentLoaded", async () => {
-  const apiUrl = "http://127.0.0.1:3000/api/posts";
+  const apiUrl = "http://127.0.0.1:3000/utils/posts";
   const token = localStorage.getItem("token");
 
   if (!token) {
@@ -465,3 +467,298 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await carregarPosts();
 });
+
+async function checkAuthAndLoadFeed() {
+  try {
+    const response = await fetch("/auth/check", {
+      method: "GET",
+      credentials: "include", // Importante para sessões
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      currentUser = data.user;
+      loadPosts();
+    } else {
+      // Não autenticado, redirecionar para login
+      window.location.href = "/login";
+    }
+  } catch (error) {
+    console.error("Erro ao verificar autenticação:", error);
+    window.location.href = "/login";
+  }
+}
+
+async function loadPosts() {
+  try {
+    const response = await fetch("/api/posts?page=1&limit=10", {
+      method: "GET",
+      credentials: "include", // Importante para sessões
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      displayPosts(data.posts);
+    } else {
+      console.error("Erro ao carregar posts");
+    }
+  } catch (error) {
+    console.error("Erro ao carregar posts:", error);
+  }
+}
+
+async function handleCreatePost(event) {
+  event.preventDefault();
+
+  const content = document.getElementById("postContent").value.trim();
+
+  if (!content) {
+    alert("Por favor, escreva algo no seu post!");
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/posts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include", // Importante para sessões
+      body: JSON.stringify({ content }),
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      document.getElementById("postContent").value = ""; // Limpar textarea
+      loadPosts(); // Recarregar posts
+    } else {
+      alert(data.error || "Erro ao criar post");
+    }
+  } catch (error) {
+    console.error("Erro ao criar post:", error);
+    alert("Erro de conexão. Tente novamente.");
+  }
+}
+
+async function handleLikePost(postId) {
+  try {
+    const response = await fetch("/api/posts/like", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include", // Importante para sessões
+      body: JSON.stringify({ postId }),
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      loadPosts(); // Recarregar posts para atualizar likes
+    } else {
+      alert(data.error || "Erro ao curtir post");
+    }
+  } catch (error) {
+    console.error("Erro ao curtir post:", error);
+  }
+}
+
+async function handleDeletePost(postId) {
+  if (!confirm("Tem certeza que deseja deletar este post?")) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/posts/${postId}`, {
+      method: "DELETE",
+      credentials: "include", // Importante para sessões
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      loadPosts(); // Recarregar posts
+    } else {
+      alert(data.error || "Erro ao deletar post");
+    }
+  } catch (error) {
+    console.error("Erro ao deletar post:", error);
+  }
+}
+
+async function handleLogout() {
+  try {
+    const response = await fetch("/auth/logout", {
+      method: "POST",
+      credentials: "include", // Importante para sessões
+    });
+
+    if (response.ok) {
+      window.location.href = "/login";
+    } else {
+      alert("Erro ao fazer logout");
+    }
+  } catch (error) {
+    console.error("Erro ao fazer logout:", error);
+  }
+}
+
+function displayPosts(posts) {
+  const postsContainer = document.getElementById("postsContainer");
+
+  if (!posts || posts.length === 0) {
+    postsContainer.innerHTML = "<p>Nenhum post encontrado.</p>";
+    return;
+  }
+
+  postsContainer.innerHTML = posts
+    .map((post) => {
+      const isAuthor = currentUser && post.author._id === currentUser.id;
+      const deleteButton = isAuthor
+        ? `<button onclick="handleDeletePost('${post._id}')" class="delete-btn">Deletar</button>`
+        : "";
+
+      return `
+            <div class="post" data-post-id="${post._id}">
+                <div class="post-header">
+                    <strong>@${post.author.username}</strong>
+                    <span class="post-date">${new Date(
+                      post.createdAt
+                    ).toLocaleString("pt-BR")}</span>
+                </div>
+                <div class="post-content">
+                    <p>${post.content}</p>
+                </div>
+                <div class="post-actions">
+                    <button onclick="handleLikePost('${post._id}')" class="like-btn">
+                        ❤️ ${post.likes.length}
+                    </button>
+                    <button onclick="toggleComments('${post._id}')" class="comment-btn">
+                        💬 ${post.comments.length}
+                    </button>
+                    ${deleteButton}
+                </div>
+                <div id="comments-${post._id}" class="comments-section" style="display: none;">
+                    <!-- Comentários serão carregados aqui -->
+                </div>
+            </div>
+        `;
+    })
+    .join("");
+}
+
+async function toggleComments(postId) {
+  const commentsSection = document.getElementById(`comments-${postId}`);
+
+  if (commentsSection.style.display === "none") {
+    await loadComments(postId);
+    commentsSection.style.display = "block";
+  } else {
+    commentsSection.style.display = "none";
+  }
+}
+
+async function loadComments(postId) {
+  try {
+    const response = await fetch(`/api/comments?postId=${postId}`, {
+      method: "GET",
+      credentials: "include", // Importante para sessões
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      displayComments(postId, data.comments);
+    }
+  } catch (error) {
+    console.error("Erro ao carregar comentários:", error);
+  }
+}
+
+function displayComments(postId, comments) {
+  const commentsSection = document.getElementById(`comments-${postId}`);
+
+  const commentsHTML = comments
+    .map((comment) => {
+      const isAuthor = currentUser && comment.author._id === currentUser.id;
+      const deleteButton = isAuthor
+        ? `<button onclick="handleDeleteComment('${comment._id}')" class="delete-comment-btn">Deletar</button>`
+        : "";
+
+      return `
+            <div class="comment">
+                <strong>@${comment.author.username}</strong>
+                <span class="comment-date">${new Date(
+                  comment.createdAt
+                ).toLocaleString("pt-BR")}</span>
+                <p>${comment.content}</p>
+                ${deleteButton}
+            </div>
+        `;
+    })
+    .join("");
+
+  commentsSection.innerHTML = `
+        <div class="add-comment">
+            <textarea id="comment-input-${postId}" placeholder="Escreva um comentário..."></textarea>
+            <button onclick="handleCreateComment('${postId}')">Comentar</button>
+        </div>
+        <div class="comments-list">
+            ${commentsHTML}
+        </div>
+    `;
+}
+
+async function handleCreateComment(postId) {
+  const content = document.getElementById(`comment-input-${postId}`).value.trim();
+
+  if (!content) {
+    alert("Por favor, escreva um comentário!");
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/comments", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include", // Importante para sessões
+      body: JSON.stringify({ postId, content }),
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      document.getElementById(`comment-input-${postId}`).value = "";
+      loadComments(postId); // Recarregar comentários
+    } else {
+      alert(data.error || "Erro ao criar comentário");
+    }
+  } catch (error) {
+    console.error("Erro ao criar comentário:", error);
+  }
+}
+
+async function handleDeleteComment(commentId) {
+  if (!confirm("Tem certeza que deseja deletar este comentário?")) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/comments/${commentId}`, {
+      method: "DELETE",
+      credentials: "include", // Importante para sessões
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      loadPosts(); // Recarregar toda a página para atualizar contadores
+    } else {
+      alert(data.error || "Erro ao deletar comentário");
+    }
+  } catch (error) {
+    console.error("Erro ao deletar comentário:", error);
+  }
+}

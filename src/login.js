@@ -1,34 +1,82 @@
 const apiUrl = 'http://localhost:3000/auth';
 
-document.getElementById('loginForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const email = document.getElementById('loginEmail').value.trim();
-  const senha = document.getElementById('loginSenha').value.trim();
+document.addEventListener('DOMContentLoaded', function() {
+    // Verificar se já está logado
+    checkAuthStatus();
 
-  if (!email || !senha) {
-    document.getElementById('loginMsg').style.color = '#d32f2f';
-    document.getElementById('loginMsg').textContent = 'Preencha todos os campos obrigatórios.';
-    return;
-  }
-
-  const res = await fetch(`${apiUrl}/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, senha })
-  });
-
-  const data = await res.json();
-  if (data.token) {
-    localStorage.setItem('token', data.token);
-    document.getElementById('loginMsg').style.color = 'green';
-    document.getElementById('loginMsg').textContent = 'Login realizado com sucesso!';
-    setTimeout(() => window.location.href = 'feed.html', 1500);
-  } else {
-    document.getElementById('loginMsg').style.color = '#d32f2f';
-    if (res.status === 401 || data.error === 'Credenciais inválidas') {
-      document.getElementById('loginMsg').textContent = 'E-mail ou senha incorretos.';
-    } else {
-      document.getElementById('loginMsg').textContent = data.error || 'Erro ao realizar login.';
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
     }
-  }
+});
+
+async function checkAuthStatus() {
+    try {
+        const response = await fetch('/auth/check', {
+            method: 'GET',
+            credentials: 'include' // Importante para sessões
+        });
+        
+        if (response.ok) {
+            // Já está logado, redirecionar para o feed
+            window.location.href = '/feed';
+        }
+    } catch (error) {
+        console.log('Usuário não autenticado');
+    }
+}
+
+async function handleLogin(event) {
+    event.preventDefault();
+    
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const errorMessage = document.getElementById('errorMessage');
+    
+    // Limpar mensagens de erro anteriores
+    errorMessage.style.display = 'none';
+    
+    // Validação básica
+    if (!email || !password) {
+        showError('Por favor, preencha todos os campos.');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/auth/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include', // Importante para sessões
+            body: JSON.stringify({ email, password })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Login bem-sucedido - não precisa mais armazenar token
+            window.location.href = '/feed';
+        } else {
+            showError(data.error || 'Erro no login');
+        }
+    } catch (error) {
+        console.error('Erro no login:', error);
+        showError('Erro de conexão. Tente novamente.');
+    }
+}
+
+function showError(message) {
+    const errorMessage = document.getElementById('errorMessage');
+    errorMessage.textContent = message;
+    errorMessage.style.display = 'block';
+}
+
+// Limpar mensagens ao digitar
+document.getElementById('loginEmail').addEventListener('input', () => {
+  document.getElementById('loginMsg').textContent = '';
+});
+
+document.getElementById('loginSenha').addEventListener('input', () => {
+  document.getElementById('loginMsg').textContent = '';
 });
