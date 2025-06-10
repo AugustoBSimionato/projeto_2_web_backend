@@ -1,0 +1,24 @@
+[2025-05-08T12:37:42.555Z] Error: Teste de erro do logger
+    at testeErro (/Users/augustosimionato/Documents/GitHub/projeto_1_web_backend/logs/loggerTest.js:4:19)
+    at Object.<anonymous> (/Users/augustosimionato/Documents/GitHub/projeto_1_web_backend/logs/loggerTest.js:9:1)
+    at Module._compile (node:internal/modules/cjs/loader:1734:14)
+    at Object..js (node:internal/modules/cjs/loader:1899:10)
+    at Module.load (node:internal/modules/cjs/loader:1469:32)
+    at Function._load (node:internal/modules/cjs/loader:1286:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:151:5)
+    at node:internal/main/run_main_module:33:47
+
+[2025-05-08T12:39:20.120Z] Error: Teste de erro do logger
+    at testeErro (/Users/augustosimionato/Documents/GitHub/projeto_1_web_backend/logs/loggerTest.js:4:19)
+    at Object.<anonymous> (/Users/augustosimionato/Documents/GitHub/projeto_1_web_backend/logs/loggerTest.js:9:1)
+    at Module._compile (node:internal/modules/cjs/loader:1734:14)
+    at Object..js (node:internal/modules/cjs/loader:1899:10)
+    at Module.load (node:internal/modules/cjs/loader:1469:32)
+    at Function._load (node:internal/modules/cjs/loader:1286:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:151:5)
+    at node:internal/main/run_main_module:33:47
+
